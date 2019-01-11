@@ -34,7 +34,7 @@ func TestTextRows(t *testing.T) {
 		},
 		{
 			name:             "quoted hello world parsing",
-			firstColumnData:  `UserAgent "Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots"`,
+			firstColumnData:  `hello "" `,
 			secondColumnData: "world",
 		},
 	}
