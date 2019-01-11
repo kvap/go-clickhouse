@@ -3,6 +3,7 @@ package clickhouse
 import (
 	"bytes"
 	"database/sql/driver"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"reflect"
@@ -21,34 +22,59 @@ func (r *bufReadCloser) Close() error {
 }
 
 func TestTextRows(t *testing.T) {
-	buf := bytes.NewReader([]byte("Number\tText\nInt32\tString\n1\thello\n2\tworld\n"))
-	rows, err := newTextRows(&conn{}, &bufReadCloser{buf}, time.Local, false)
-	if !assert.NoError(t, err) {
-		return
-	}
-	assert.Equal(t, []string{"Number", "Text"}, rows.Columns())
-	assert.Equal(t, []string{"Int32", "String"}, rows.types)
-	assert.Equal(t, reflect.TypeOf(int32(0)), rows.ColumnTypeScanType(0))
-	assert.Equal(t, reflect.TypeOf(""), rows.ColumnTypeScanType(1))
-	assert.Equal(t, "Int32", rows.ColumnTypeDatabaseTypeName(0))
-	assert.Equal(t, "String", rows.ColumnTypeDatabaseTypeName(1))
-
-	dest := make([]driver.Value, 2)
-	if !assert.NoError(t, rows.Next(dest)) {
-		return
-	}
-	assert.Equal(t, []driver.Value{int32(1), "hello"}, dest)
-	if !assert.NoError(t, rows.Next(dest)) {
-		return
-	}
-	assert.Equal(t, []driver.Value{int32(2), "world"}, dest)
-	data, err := ioutil.ReadAll(rows.respBody)
-	if !assert.NoError(t, err) {
-		return
+	testCases := []*struct {
+		name             string
+		firstColumnData  string
+		secondColumnData string
+	}{
+		{
+			name:             "hello world parsing",
+			firstColumnData:  "hello",
+			secondColumnData: "world",
+		},
+		{
+			name:             "quoted hello world parsing",
+			firstColumnData:  `hello "" `,
+			secondColumnData: "world",
+		},
 	}
 
-	assert.Equal(t, 0, len(data))
-	assert.Equal(t, io.EOF, rows.Next(dest))
-	assert.NoError(t, rows.Close())
-	assert.Empty(t, data)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+
+			input := fmt.Sprintf("Number\tText\nInt32\tString\n1\t%s\n2\t%s\n", tc.firstColumnData, tc.secondColumnData)
+
+			buf := bytes.NewReader([]byte(input))
+			rows, err := newTextRows(&conn{}, &bufReadCloser{buf}, time.Local, false)
+			if !assert.NoError(t, err) {
+				return
+			}
+			assert.Equal(t, []string{"Number", "Text"}, rows.Columns())
+			assert.Equal(t, []string{"Int32", "String"}, rows.types)
+			assert.Equal(t, reflect.TypeOf(int32(0)), rows.ColumnTypeScanType(0))
+			assert.Equal(t, reflect.TypeOf(""), rows.ColumnTypeScanType(1))
+			assert.Equal(t, "Int32", rows.ColumnTypeDatabaseTypeName(0))
+			assert.Equal(t, "String", rows.ColumnTypeDatabaseTypeName(1))
+
+			dest := make([]driver.Value, 2)
+			if !assert.NoError(t, rows.Next(dest)) {
+				return
+			}
+
+			assert.Equal(t, []driver.Value{int32(1), tc.firstColumnData}, dest)
+			if !assert.NoError(t, rows.Next(dest)) {
+				return
+			}
+			assert.Equal(t, []driver.Value{int32(2), tc.secondColumnData}, dest)
+			data, err := ioutil.ReadAll(rows.respBody)
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			assert.Equal(t, 0, len(data))
+			assert.Equal(t, io.EOF, rows.Next(dest))
+			assert.NoError(t, rows.Close())
+			assert.Empty(t, data)
+		})
+	}
 }
